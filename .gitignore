@@ -3,9 +3,11 @@
 build/
 *.class
 out/
-*.jar
 *.war
 *.ear
+# Exclude all JARs except the Gradle wrapper (required for builds)
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
 
 # Maven (just in case)
 target/
