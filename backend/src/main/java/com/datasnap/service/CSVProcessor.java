@@ -1,6 +1,6 @@
 package com.datasnap.service;
 
-import com.datasnap.model.ChartData;
+import com.datasnap.model.ParsedCSVData;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvValidationException;
 import org.springframework.stereotype.Service;
@@ -9,15 +9,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class CSVProcessor {
 
-    public ChartData parse(InputStream inputStream) throws IOException {
-        List<String> labels = new ArrayList<>();
-        List<Number> values = new ArrayList<>();
+    public ParsedCSVData parse(InputStream inputStream) throws IOException {
         List<String> columnNames = new ArrayList<>();
+        List<List<String>> rows = new ArrayList<>();
 
         try (CSVReader reader = new CSVReader(new InputStreamReader(inputStream))) {
             String[] header;
@@ -28,43 +29,38 @@ public class CSVProcessor {
             }
 
             if (header == null || header.length < 2) {
-                throw new IOException("CSV must have at least two columns: a label column and a numeric value column.");
+                throw new IOException("CSV must have at least two columns.");
             }
 
-            columnNames.add(header[0].trim());
-            columnNames.add(header[1].trim());
+            for (String col : header) {
+                columnNames.add(col.trim());
+            }
 
             String[] row;
             int rowIndex = 1;
             try {
                 while ((row = reader.readNext()) != null) {
                     rowIndex++;
-                    if (row.length < 2) {
-                        throw new IOException("Row " + rowIndex + " has fewer than 2 columns.");
+                    if (row.length == 0 || (row.length == 1 && row[0].trim().isEmpty())) {
+                        continue;
                     }
-
-                    String label = row[0].trim();
-                    String rawValue = row[1].trim();
-
-                    double numericValue;
-                    try {
-                        numericValue = Double.parseDouble(rawValue);
-                    } catch (NumberFormatException e) {
-                        throw new IOException("Row " + rowIndex + ": value '" + rawValue + "' is not a valid number.");
+                    List<String> rowData = Arrays.stream(row)
+                            .map(String::trim)
+                            .collect(Collectors.toList());
+                    while (rowData.size() < columnNames.size()) {
+                        rowData.add("");
                     }
-
-                    labels.add(label);
-                    values.add(numericValue);
+                    rows.add(rowData);
                 }
             } catch (CsvValidationException e) {
                 throw new IOException("Malformed CSV at row " + rowIndex + ": " + e.getMessage());
             }
         }
 
-        if (labels.isEmpty()) {
+        if (rows.isEmpty()) {
             throw new IOException("CSV file contains no data rows.");
         }
 
-        return new ChartData(labels, values, columnNames);
+        return new ParsedCSVData(columnNames, rows);
     }
 }

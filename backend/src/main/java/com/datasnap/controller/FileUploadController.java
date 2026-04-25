@@ -1,6 +1,6 @@
 package com.datasnap.controller;
 
-import com.datasnap.model.ChartData;
+import com.datasnap.model.ParsedCSVData;
 import com.datasnap.service.CSVProcessor;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpHeaders;
@@ -23,7 +23,7 @@ public class FileUploadController {
     }
 
     @PostMapping("/upload")
-    public ResponseEntity<ChartData> uploadFile(@RequestParam("file") MultipartFile file) throws IOException {
+    public ResponseEntity<ParsedCSVData> uploadFile(@RequestParam("file") MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("No file provided or file is empty.");
         }
@@ -33,8 +33,8 @@ public class FileUploadController {
             throw new IllegalArgumentException("Invalid file type. Only .csv files are accepted.");
         }
 
-        ChartData chartData = csvProcessor.parse(file.getInputStream());
-        return ResponseEntity.ok(chartData);
+        ParsedCSVData data = csvProcessor.parse(file.getInputStream());
+        return ResponseEntity.ok(data);
     }
 
     @GetMapping("/sample")
