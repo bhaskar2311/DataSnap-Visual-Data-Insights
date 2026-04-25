@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -20,6 +20,14 @@ ChartJS.register(
   BarElement, LineElement, PointElement, ArcElement,
   Title, Tooltip, Legend, Filler,
 )
+
+function DownloadIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  )
+}
 
 const CHART_TYPES = [
   { id: 'bar',       label: 'Bar' },
@@ -118,8 +126,64 @@ function renderChart(chartType, dataset, options) {
   }
 }
 
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function toCSV(chartData) {
+  const { columnNames, labels, values } = chartData
+  const header = [columnNames[0], columnNames[1], 'Percentage'].join(',')
+  const total  = values.reduce((a, b) => a + b, 0)
+  const rows   = labels.map((label, i) => {
+    const pct = total > 0 ? ((values[i] / total) * 100).toFixed(2) : '0.00'
+    return [`"${String(label).replace(/"/g, '""')}"`, values[i], pct].join(',')
+  })
+  return [header, ...rows].join('\r\n')
+}
+
+function toJSON(chartData) {
+  const { columnNames, labels, values } = chartData
+  const total = values.reduce((a, b) => a + b, 0)
+  const data  = labels.map((label, i) => ({
+    [columnNames[0]]: label,
+    [columnNames[1]]: values[i],
+    percentage: total > 0 ? parseFloat(((values[i] / total) * 100).toFixed(2)) : 0,
+  }))
+  return JSON.stringify({ meta: { labelColumn: columnNames[0], valueColumn: columnNames[1], totalRows: labels.length, total }, data }, null, 2)
+}
+
 export default function ChartDisplay({ chartData, onReconfigure, onReset }) {
-  const [activeType, setActiveType] = useState(chartData.chartType || 'bar')
+  const [activeType, setActiveType]   = useState(chartData.chartType || 'bar')
+  const [downloaded, setDownloaded]   = useState(null)
+  const chartRef = useRef(null)
+
+  function handleDownload(format) {
+    const slug = (chartData.columnNames[1] || 'data').replace(/\s+/g, '_').toLowerCase()
+    const ts   = new Date().toISOString().slice(0, 10)
+    if (format === 'csv') {
+      downloadFile(toCSV(chartData), `datasnap_${slug}_${ts}.csv`, 'text/csv;charset=utf-8;')
+    } else if (format === 'json') {
+      downloadFile(toJSON(chartData), `datasnap_${slug}_${ts}.json`, 'application/json')
+    } else if (format === 'png') {
+      const canvas = document.querySelector('.main-chart canvas')
+      if (canvas) {
+        const link = document.createElement('a')
+        link.download = `datasnap_${slug}_${ts}.png`
+        link.href = canvas.toDataURL('image/png')
+        link.click()
+      }
+    }
+    setDownloaded(format)
+    setTimeout(() => setDownloaded(null), 2000)
+  }
 
   const dataset = buildDataset({ ...chartData, chartType: activeType })
   const options  = buildOptions(activeType, chartData.columnNames)
@@ -178,6 +242,37 @@ export default function ChartDisplay({ chartData, onReconfigure, onReset }) {
         <div className="stat-card">
           <span className="stat-label">Data Points</span>
           <span className="stat-value">{chartData.labels.length}</span>
+        </div>
+      </div>
+
+      {/* Download bar */}
+      <div className="download-bar">
+        <span className="download-label">Download cleaned data as:</span>
+        <div className="download-actions">
+          <button
+            className={`btn btn-download ${downloaded === 'csv' ? 'downloaded' : ''}`}
+            onClick={() => handleDownload('csv')}
+          >
+            {downloaded === 'csv' ? '✓ Downloaded' : (
+              <><DownloadIcon /> CSV</>
+            )}
+          </button>
+          <button
+            className={`btn btn-download ${downloaded === 'json' ? 'downloaded' : ''}`}
+            onClick={() => handleDownload('json')}
+          >
+            {downloaded === 'json' ? '✓ Downloaded' : (
+              <><DownloadIcon /> JSON</>
+            )}
+          </button>
+          <button
+            className={`btn btn-download ${downloaded === 'png' ? 'downloaded' : ''}`}
+            onClick={() => handleDownload('png')}
+          >
+            {downloaded === 'png' ? '✓ Downloaded' : (
+              <><DownloadIcon /> Chart PNG</>
+            )}
+          </button>
         </div>
       </div>
 

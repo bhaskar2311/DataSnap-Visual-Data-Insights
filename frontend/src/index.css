@@ -383,6 +383,60 @@ body {
 .percent-bar { height: 6px; background: var(--primary); border-radius: 3px; min-width: 2px; transition: width .3s; }
 .percent-bar-wrap span { font-size: .8rem; color: var(--text-muted); white-space: nowrap; }
 
+/* ── Download Bar ── */
+.download-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .9rem 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.download-label {
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.download-actions {
+  display: flex;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+
+.btn-download {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .45rem 1rem;
+  border-radius: 8px;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  transition: all .15s;
+}
+
+.btn-download:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.btn-download.downloaded {
+  border-color: var(--success);
+  color: var(--success);
+  background: #dcfce7;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .config-grid { grid-template-columns: 1fr; }
