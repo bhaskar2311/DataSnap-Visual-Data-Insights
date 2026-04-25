@@ -13,9 +13,9 @@ const CHART_TYPES = [
 ]
 
 const DUPLICATE_OPTIONS = [
-  { id: 'first',   label: 'Keep First' },
-  { id: 'sum',     label: 'Sum Values' },
-  { id: 'average', label: 'Average Values' },
+  { id: 'first',   label: 'Keep First',     hint: 'Use only the first row per label — good when each label is truly unique' },
+  { id: 'sum',     label: 'Sum',            hint: 'Add all values per label — good for counts, sales, totals' },
+  { id: 'average', label: 'Average',        hint: 'Mean of all values per label — good for Age, Salary, Score, Temperature' },
 ]
 
 // ── Smart suggestion engine ──────────────────────────────────────────────────
@@ -117,15 +117,34 @@ function suggestBestConfig(columnNames, rows) {
     chartReason = `Many categories (${lA.cardinality}). Horizontal Bar keeps the chart readable — consider filtering with Min/Max to reduce noise.`
   }
 
-  // Determine duplicate strategy
+  // Determine duplicate strategy using name hints + value characteristics
+  const valueName = vA.name.toLowerCase()
+  const AVG_HINTS = ['age', 'salary', 'price', 'score', 'rate', 'temp', 'height', 'weight',
+                     'distance', 'duration', 'speed', 'income', 'revenue', 'fare', 'grade',
+                     'rating', 'percent', 'pct', 'ratio', 'avg', 'average', 'mean', 'median']
+  const SUM_HINTS = ['count', 'total', 'num', 'qty', 'quantity', 'freq', 'frequency',
+                     'sales', 'transactions', 'orders', 'tickets', 'visits', 'clicks', 'views']
+
+  const nameHintsAvg = AVG_HINTS.some(h => valueName.includes(h))
+  const nameHintsSum = SUM_HINTS.some(h => valueName.includes(h))
+
+  // Value-range analysis: if max value is already large (>200) and not counts, it's a measurement
+  const valMax = vA.numerics.length ? Math.max(...vA.numerics) : 0
+  const hasDecimals = vA.numerics.some(v => !Number.isInteger(v))
+  const looksLikeMeasurement = hasDecimals || valMax > 200 || nameHintsAvg
+
   let duplicateStrategy = 'sum'
-  let dupReason = 'Summing duplicate labels to aggregate totals.'
+  let dupReason = 'Summing duplicate labels — good for counts and totals.'
+
   if (vA.isBinary) {
     duplicateStrategy = 'average'
-    dupReason = 'Binary (0/1) values detected — averaging gives a rate/proportion.'
-  } else if (vA.hasNegatives) {
+    dupReason = 'Binary (0/1) values detected — averaging gives a rate/proportion (e.g. survival rate).'
+  } else if (vA.hasNegatives || nameHintsAvg || (looksLikeMeasurement && !nameHintsSum)) {
     duplicateStrategy = 'average'
-    dupReason = 'Negative values detected — averaging is safer than summing.'
+    dupReason = `"${vA.name}" looks like a measurement — averaging per label gives meaningful values (e.g. average age per class).`
+  } else if (nameHintsSum) {
+    duplicateStrategy = 'sum'
+    dupReason = `"${vA.name}" looks like a count/total — summing per label gives the correct aggregate.`
   }
 
   // Detect column quality issues
@@ -213,6 +232,32 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
   const [suggestionApplied, setSuggestionApplied] = useState(false)
 
   const preview = useMemo(() => rows.slice(0, 5), [rows])
+
+  // Detect when Sum is producing unreasonably inflated values
+  const aggregationWarning = useMemo(() => {
+    if (duplicateStrategy !== 'sum') return null
+    // Find the max raw value in the value column
+    const rawNumerics = rows.map(r => parseFloat((r[valueCol] || '').trim())).filter(v => !isNaN(v))
+    if (!rawNumerics.length) return null
+    const rawMax = Math.max(...rawNumerics)
+    // Check how many rows map to each label
+    const labelCounts = {}
+    rows.forEach(r => {
+      const lbl = (r[labelCol] || '').trim()
+      if (lbl) labelCounts[lbl] = (labelCounts[lbl] || 0) + 1
+    })
+    const maxGroupSize = Math.max(...Object.values(labelCounts))
+    // If summing would multiply the value by a large factor, warn
+    if (maxGroupSize > 5 && rawMax * maxGroupSize > rawMax * 3) {
+      const colName = columnNames[valueCol]
+      const avgHints = ['age', 'salary', 'price', 'score', 'rate', 'temp', 'height', 'weight', 'fare', 'grade', 'rating', 'percent', 'income']
+      const looksLikeMeasurement = avgHints.some(h => colName.toLowerCase().includes(h)) || rawMax > 100
+      if (looksLikeMeasurement) {
+        return `⚠ "${colName}" looks like a measurement (max raw value: ${rawMax.toLocaleString()}). With Sum, values from up to ${maxGroupSize} rows get added together — producing numbers like ${(rawMax * maxGroupSize).toLocaleString()}. Switch to "Average" to get meaningful values like the actual ${colName}.`
+      }
+    }
+    return null
+  }, [rows, labelCol, valueCol, duplicateStrategy, columnNames])
 
   const processedPreview = useMemo(() => {
     try {
@@ -403,11 +448,24 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
 
             <div className="field" style={{ marginTop: '1rem' }}>
               <label className="field-label">Duplicate Label Handling</label>
-              <div className="radio-group">
+
+              {aggregationWarning && (
+                <div className="aggregation-warning">
+                  <p>{aggregationWarning}</p>
+                  <button className="agg-fix-btn" onClick={() => setDuplicate('average')}>
+                    Switch to Average →
+                  </button>
+                </div>
+              )}
+
+              <div className="dup-options">
                 {DUPLICATE_OPTIONS.map(opt => (
-                  <label key={opt.id} className={`radio-btn ${duplicateStrategy === opt.id ? 'active' : ''}`}>
+                  <label key={opt.id} className={`dup-option ${duplicateStrategy === opt.id ? 'active' : ''}`}>
                     <input type="radio" name="duplicate" value={opt.id} checked={duplicateStrategy === opt.id} onChange={() => setDuplicate(opt.id)} />
-                    {opt.label}
+                    <div className="dup-option-text">
+                      <span className="dup-option-label">{opt.label}</span>
+                      <span className="dup-option-hint">{opt.hint}</span>
+                    </div>
                   </label>
                 ))}
               </div>

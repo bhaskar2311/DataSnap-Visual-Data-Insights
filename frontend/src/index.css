@@ -289,9 +289,8 @@ body {
 .checkbox-row strong { font-size: .9rem; font-weight: 600; }
 .checkbox-row small { font-size: .78rem; color: var(--text-muted); }
 
-/* ── Radio Group ── */
+/* ── Radio Group (legacy) ── */
 .radio-group { display: flex; gap: .5rem; flex-wrap: wrap; }
-
 .radio-btn {
   display: flex; align-items: center; gap: .4rem;
   padding: .4rem .85rem;
@@ -306,6 +305,62 @@ body {
 }
 .radio-btn.active { border-color: var(--primary); background: var(--primary-light); color: var(--primary); }
 .radio-btn input { display: none; }
+
+/* ── Aggregation Warning ── */
+.aggregation-warning {
+  background: #fef3c7;
+  border: 1.5px solid #f59e0b;
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  margin-bottom: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+[data-theme="dark"] .aggregation-warning {
+  background: #451a03;
+  border-color: #d97706;
+}
+.aggregation-warning p {
+  font-size: .82rem;
+  color: #92400e;
+  line-height: 1.5;
+}
+[data-theme="dark"] .aggregation-warning p { color: #fcd34d; }
+.agg-fix-btn {
+  align-self: flex-start;
+  background: #f59e0b;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: .3rem .85rem;
+  font-size: .8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s;
+}
+.agg-fix-btn:hover { background: #d97706; }
+
+/* ── Duplicate Option Cards ── */
+.dup-options { display: flex; flex-direction: column; gap: .4rem; }
+
+.dup-option {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+  padding: .6rem .85rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--bg);
+  transition: all .15s;
+}
+.dup-option:hover { border-color: var(--primary); background: var(--primary-light); }
+.dup-option.active { border-color: var(--primary); background: var(--primary-light); }
+.dup-option input { accent-color: var(--primary); margin-top: .2rem; flex-shrink: 0; }
+.dup-option-text { display: flex; flex-direction: column; gap: .1rem; }
+.dup-option-label { font-size: .875rem; font-weight: 600; color: var(--text); }
+.dup-option-hint  { font-size: .75rem; color: var(--text-muted); line-height: 1.4; }
 
 /* ── Chart Type Picker ── */
 .chart-type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
