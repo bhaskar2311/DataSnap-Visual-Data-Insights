@@ -1,17 +1,27 @@
 import { useState, useRef } from 'react'
+import Papa from 'papaparse'
 
 const MAX_SIZE_BYTES = 50 * 1024 * 1024 // 50MB
 
 function formatSize(bytes) {
-  if (bytes < 1024)       return `${bytes} B`
+  if (bytes < 1024)        return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function FileUpload({ onUpload, onDownloadSample, isLoading }) {
-  const [dragOver, setDragOver]       = useState(false)
+function downloadSampleCSV() {
+  const link = document.createElement('a')
+  link.href = '/sample.csv'
+  link.setAttribute('download', 'sample.csv')
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+export default function FileUpload({ onUpload, isLoading }) {
+  const [dragOver, setDragOver]         = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
-  const [fileError, setFileError]     = useState(null)
+  const [fileError, setFileError]       = useState(null)
   const inputRef = useRef(null)
 
   function handleFile(file) {
@@ -24,14 +34,14 @@ export default function FileUpload({ onUpload, onDownloadSample, isLoading }) {
       return
     }
 
-    if (file.size > MAX_SIZE_BYTES) {
-      setFileError(`File is too large (${formatSize(file.size)}). Maximum allowed size is 50 MB.`)
+    if (file.size === 0) {
+      setFileError('The selected file is empty. Please choose a CSV with data.')
       setSelectedFile(null)
       return
     }
 
-    if (file.size === 0) {
-      setFileError('The selected file is empty. Please choose a CSV with data.')
+    if (file.size > MAX_SIZE_BYTES) {
+      setFileError(`File is too large (${formatSize(file.size)}). Maximum allowed size is 50 MB.`)
       setSelectedFile(null)
       return
     }
@@ -51,7 +61,26 @@ export default function FileUpload({ onUpload, onDownloadSample, isLoading }) {
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (selectedFile) onUpload(selectedFile)
+    if (!selectedFile) return
+
+    Papa.parse(selectedFile, {
+      skipEmptyLines: true,
+      complete(results) {
+        const allRows = results.data
+        if (!allRows || allRows.length < 2) {
+          setFileError('CSV has no data rows. Please upload a file with at least one header row and one data row.')
+          return
+        }
+        const columnNames = allRows[0].map(h => String(h).trim())
+        const rows = allRows.slice(1).map(row =>
+          row.map(cell => String(cell ?? ''))
+        )
+        onUpload({ columnNames, rows })
+      },
+      error(err) {
+        setFileError(`Could not parse CSV: ${err.message}`)
+      },
+    })
   }
 
   return (
@@ -77,7 +106,7 @@ export default function FileUpload({ onUpload, onDownloadSample, isLoading }) {
         ) : selectedFile ? (
           <p className="drop-zone-text selected">
             <strong>{selectedFile.name}</strong>
-            <span> &nbsp;({formatSize(selectedFile.size)})</span>
+            <span>&nbsp;({formatSize(selectedFile.size)})</span>
           </p>
         ) : (
           <p className="drop-zone-text">
@@ -85,7 +114,7 @@ export default function FileUpload({ onUpload, onDownloadSample, isLoading }) {
           </p>
         )}
 
-        <p className="drop-zone-hint">Supports .csv files &middot; up to 50 MB</p>
+        <p className="drop-zone-hint">Supports .csv files &middot; up to 50 MB &middot; parsed instantly in your browser</p>
         <input
           ref={inputRef}
           type="file"
@@ -107,7 +136,7 @@ export default function FileUpload({ onUpload, onDownloadSample, isLoading }) {
             </span>
           ) : 'Upload & Configure'}
         </button>
-        <button className="btn btn-secondary" onClick={onDownloadSample} disabled={isLoading}>
+        <button className="btn btn-secondary" onClick={downloadSampleCSV} disabled={isLoading}>
           Download Sample CSV
         </button>
       </div>

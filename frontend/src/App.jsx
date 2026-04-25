@@ -3,7 +3,6 @@ import FileUpload from './components/FileUpload'
 import DataConfigurator from './components/DataConfigurator'
 import ChartDisplay from './components/ChartDisplay'
 import ErrorMessage from './components/ErrorMessage'
-import { uploadCSV, downloadSample } from './services/api'
 
 function SunIcon() {
   return (
@@ -28,7 +27,7 @@ export default function App() {
   const [parsedData, setParsedData] = useState(null)
   const [chartData, setChartData]   = useState(null)
   const [error, setError]           = useState(null)
-  const [isLoading, setIsLoading]   = useState(false)
+  const [isLoading]                 = useState(false)
   const [darkMode, setDarkMode]     = useState(() => {
     const saved = localStorage.getItem('datasnap-theme')
     return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -39,24 +38,9 @@ export default function App() {
     localStorage.setItem('datasnap-theme', darkMode ? 'dark' : 'light')
   }, [darkMode])
 
-  async function handleUpload(file) {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const data = await uploadCSV(file)
-      setParsedData(data)
-      setStep('configure')
-    } catch (err) {
-      const msg = err.response?.data?.message || 'Something went wrong. Please check your file and try again.'
-      setError(msg)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function handleDownloadSample() {
-    try { await downloadSample() }
-    catch { setError('Failed to download sample file. Make sure the backend is running.') }
+  function handleUpload(parsedData) {
+    setParsedData(parsedData)
+    setStep('configure')
   }
 
   function handleVisualize(data) { setChartData(data); setStep('visualize') }
@@ -118,7 +102,6 @@ export default function App() {
             </div>
             <FileUpload
               onUpload={handleUpload}
-              onDownloadSample={handleDownloadSample}
               isLoading={isLoading}
             />
           </>
