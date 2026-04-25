@@ -118,6 +118,8 @@ body {
   background: var(--bg);
 }
 .drop-zone:hover, .drop-zone.drag-over { border-color: var(--primary); background: var(--primary-light); }
+.drop-zone-error { border-color: var(--danger) !important; background: var(--danger-light) !important; }
+.file-error-text { color: var(--danger) !important; font-weight: 600; }
 .drop-zone-icon { color: var(--primary); margin-bottom: 1rem; display: flex; justify-content: center; }
 .drop-zone-text { font-size: .95rem; color: var(--text-muted); margin-bottom: .4rem; }
 .drop-zone-text.selected { color: var(--text); }

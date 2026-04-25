@@ -16,7 +16,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleMaxSizeExceeded(MaxUploadSizeExceededException ex) {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse("File size exceeds the maximum allowed limit of 1MB.", 400));
+                .body(new ErrorResponse("File size exceeds the 50MB limit. Please split the file into smaller chunks or reduce the number of rows.", 400));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
