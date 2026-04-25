@@ -1,0 +1,47 @@
+# Gradle
+.gradle/
+build/
+*.class
+out/
+*.jar
+*.war
+*.ear
+
+# Maven (just in case)
+target/
+
+# Node / React
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE - IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# IDE - VS Code
+.vscode/
+
+# IDE - Eclipse
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Spring Boot
+*.log
+logs/
+
+# Vite
+*.local
