@@ -1,12 +1,15 @@
 import { useState, useMemo } from 'react'
 
 const CHART_TYPES = [
-  { id: 'bar',       label: 'Bar',        icon: '▊▊▊' },
-  { id: 'line',      label: 'Line',       icon: '📈' },
-  { id: 'pie',       label: 'Pie',        icon: '◔' },
-  { id: 'doughnut',  label: 'Doughnut',   icon: '◎' },
-  { id: 'polarArea', label: 'Polar Area', icon: '⊛' },
-  { id: 'radar',     label: 'Radar',      icon: '✦' },
+  { id: 'bar',           label: 'Bar',         icon: '▊▊▊' },
+  { id: 'horizontalBar', label: 'Horiz. Bar',  icon: '▬▬▬' },
+  { id: 'line',          label: 'Line',        icon: '📈' },
+  { id: 'area',          label: 'Area',        icon: '◿' },
+  { id: 'steppedLine',   label: 'Stepped',     icon: '⌐' },
+  { id: 'pie',           label: 'Pie',         icon: '◔' },
+  { id: 'doughnut',      label: 'Doughnut',    icon: '◎' },
+  { id: 'polarArea',     label: 'Polar Area',  icon: '⊛' },
+  { id: 'radar',         label: 'Radar',       icon: '✦' },
 ]
 
 const DUPLICATE_OPTIONS = [
@@ -86,21 +89,32 @@ function suggestBestConfig(columnNames, rows) {
   let chartType  = 'bar'
   let chartReason = ''
 
-  if (lA.looksLikeDate) {
-    chartType   = 'line'
-    chartReason = 'Date-like labels detected — a Line chart shows trends over time best.'
+  // Check if label values are monotonically increasing (time-series or sequential)
+  const labelNums = lA.looksLikeDate ? [] : analysis[labelIdx].numerics
+  const isSequential = labelNums.length > 3 && labelNums.every((v, i) => i === 0 || v >= labelNums[i - 1])
+
+  if (lA.looksLikeDate || isSequential) {
+    chartType   = 'area'
+    chartReason = 'Sequential or date-like labels detected — an Area chart shows trends and magnitude together.'
   } else if (lA.cardinality <= 4) {
     chartType   = 'doughnut'
     chartReason = `Only ${lA.cardinality} categories — a Doughnut chart shows part-of-whole proportions clearly.`
   } else if (lA.cardinality <= 8) {
     chartType   = 'pie'
-    chartReason = `${lA.cardinality} categories — a Pie chart gives a clear breakdown.`
+    chartReason = `${lA.cardinality} categories — a Pie chart gives a clear breakdown at a glance.`
   } else if (lA.cardinality <= 20) {
-    chartType   = 'bar'
-    chartReason = `${lA.cardinality} categories — a Bar chart is the clearest comparison tool here.`
+    // Check if labels are long strings — horizontal bar is easier to read
+    const avgLabelLen = analysis[labelIdx].unique ? analysis[labelIdx].unique.reduce((s, v) => s + String(v).length, 0) / analysis[labelIdx].unique.length : 0
+    if (avgLabelLen > 10) {
+      chartType   = 'horizontalBar'
+      chartReason = `${lA.cardinality} categories with long labels — a Horizontal Bar chart keeps labels readable.`
+    } else {
+      chartType   = 'bar'
+      chartReason = `${lA.cardinality} categories — a Bar chart is the clearest comparison tool here.`
+    }
   } else {
-    chartType   = 'bar'
-    chartReason = `Many categories (${lA.cardinality}). Bar chart used — consider using the Min/Max filter or Duplicate handling to reduce noise.`
+    chartType   = 'horizontalBar'
+    chartReason = `Many categories (${lA.cardinality}). Horizontal Bar keeps the chart readable — consider filtering with Min/Max to reduce noise.`
   }
 
   // Determine duplicate strategy

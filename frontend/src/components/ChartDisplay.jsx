@@ -30,12 +30,15 @@ function DownloadIcon() {
 }
 
 const CHART_TYPES = [
-  { id: 'bar',       label: 'Bar' },
-  { id: 'line',      label: 'Line' },
-  { id: 'pie',       label: 'Pie' },
-  { id: 'doughnut',  label: 'Doughnut' },
-  { id: 'polarArea', label: 'Polar Area' },
-  { id: 'radar',     label: 'Radar' },
+  { id: 'bar',           label: 'Bar' },
+  { id: 'horizontalBar', label: 'Horiz. Bar' },
+  { id: 'line',          label: 'Line' },
+  { id: 'area',          label: 'Area' },
+  { id: 'steppedLine',   label: 'Stepped' },
+  { id: 'pie',           label: 'Pie' },
+  { id: 'doughnut',      label: 'Doughnut' },
+  { id: 'polarArea',     label: 'Polar Area' },
+  { id: 'radar',         label: 'Radar' },
 ]
 
 const DEFAULT_COLORS = [
@@ -58,28 +61,33 @@ const PALETTE = [
 // ── Dataset builder (uses custom colors) ────────────────────────────────────
 
 function buildDataset(chartData, colors, activeType) {
-  const bgColors = chartData.labels.map((_, i) => colors[i] || DEFAULT_COLORS[i % DEFAULT_COLORS.length])
+  const bgColors  = chartData.labels.map((_, i) => colors[i] || DEFAULT_COLORS[i % DEFAULT_COLORS.length])
+  const primary   = colors[0] || DEFAULT_COLORS[0]
 
   const baseDataset = {
     label: chartData.columnNames[1] || 'Value',
-    data: chartData.values,
+    data:  chartData.values,
     backgroundColor: bgColors,
-    borderColor: bgColors,
+    borderColor:     bgColors,
     borderWidth: 1,
   }
 
-  if (activeType === 'line') {
+  // Line-family: single colour with gradient fill
+  if (activeType === 'line' || activeType === 'area' || activeType === 'steppedLine') {
     return {
       labels: chartData.labels,
       datasets: [{
         ...baseDataset,
-        backgroundColor: colors[0] + '26',
-        borderColor: colors[0] || DEFAULT_COLORS[0],
-        borderWidth: 2,
-        pointBackgroundColor: colors[0] || DEFAULT_COLORS[0],
-        pointRadius: 5,
-        tension: 0.4,
-        fill: true,
+        backgroundColor: activeType === 'area' ? primary + '33' : primary + '18',
+        borderColor:     primary,
+        borderWidth:     2.5,
+        pointBackgroundColor: primary,
+        pointBorderColor:     '#fff',
+        pointBorderWidth:     2,
+        pointRadius:     activeType === 'steppedLine' ? 3 : 4,
+        tension:         activeType === 'steppedLine' ? 0 : 0.4,
+        fill:            activeType === 'line' ? false : true,
+        stepped:         activeType === 'steppedLine' ? 'before' : false,
       }],
     }
   }
@@ -89,51 +97,71 @@ function buildDataset(chartData, colors, activeType) {
       labels: chartData.labels,
       datasets: [{
         ...baseDataset,
-        backgroundColor: (colors[0] || DEFAULT_COLORS[0]) + '40',
-        borderColor: colors[0] || DEFAULT_COLORS[0],
-        borderWidth: 2,
-        pointBackgroundColor: colors[0] || DEFAULT_COLORS[0],
+        backgroundColor: primary + '33',
+        borderColor:     primary,
+        borderWidth:     2,
+        pointBackgroundColor: primary,
+        pointBorderColor:     '#fff',
+        pointBorderWidth:     2,
+        pointRadius:     4,
       }],
     }
   }
 
+  // Horizontal bar & regular bar — per-bar colours
   return { labels: chartData.labels, datasets: [baseDataset] }
 }
 
 function buildOptions(chartType, columnNames) {
   const titleText = `${columnNames[1] || 'Value'} by ${columnNames[0] || 'Category'}`
-  const base = {
-    responsive: true,
-    plugins: {
-      legend: { position: 'bottom' },
-      title: { display: true, text: titleText, font: { size: 15, weight: '600' } },
-      tooltip: {
-        callbacks: {
-          label: (ctx) => {
-            const val = ctx.parsed?.y ?? ctx.parsed ?? ctx.raw
-            const num = typeof val === 'number' ? val : parseFloat(val)
-            return ` ${ctx.label || ctx.dataset.label}: ${isNaN(num) ? val : num.toLocaleString()}`
-          },
-        },
+
+  const tooltip = {
+    callbacks: {
+      label: (ctx) => {
+        const val = ctx.parsed?.y ?? ctx.parsed?.x ?? ctx.parsed ?? ctx.raw
+        const num = typeof val === 'number' ? val : parseFloat(val)
+        return ` ${ctx.label || ctx.dataset.label}: ${isNaN(num) ? val : num.toLocaleString()}`
       },
     },
   }
 
-  if (chartType === 'bar' || chartType === 'line') {
-    return { ...base, plugins: { ...base.plugins, legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  const base = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'bottom' },
+      title:  { display: true, text: titleText, font: { size: 15, weight: '600' } },
+      tooltip,
+    },
+  }
+
+  // Cartesian charts (no legend needed, have axes)
+  if (['bar', 'horizontalBar', 'line', 'area', 'steppedLine'].includes(chartType)) {
+    const isHorizontal = chartType === 'horizontalBar'
+    return {
+      ...base,
+      indexAxis: isHorizontal ? 'y' : 'x',
+      plugins: { ...base.plugins, legend: { display: false } },
+      scales: {
+        x: { beginAtZero: !isHorizontal },
+        y: { beginAtZero: isHorizontal ? false : true },
+      },
+    }
   }
   return base
 }
 
 function renderChart(chartType, dataset, options) {
   switch (chartType) {
-    case 'bar':       return <Bar data={dataset} options={options} />
-    case 'line':      return <Line data={dataset} options={options} />
-    case 'pie':       return <Pie data={dataset} options={options} />
-    case 'doughnut':  return <Doughnut data={dataset} options={options} />
-    case 'polarArea': return <PolarArea data={dataset} options={options} />
-    case 'radar':     return <Radar data={dataset} options={options} />
-    default:          return <Bar data={dataset} options={options} />
+    case 'bar':           return <Bar       data={dataset} options={options} />
+    case 'horizontalBar': return <Bar       data={dataset} options={options} />
+    case 'line':          return <Line      data={dataset} options={options} />
+    case 'area':          return <Line      data={dataset} options={options} />
+    case 'steppedLine':   return <Line      data={dataset} options={options} />
+    case 'pie':           return <Pie       data={dataset} options={options} />
+    case 'doughnut':      return <Doughnut  data={dataset} options={options} />
+    case 'polarArea':     return <PolarArea data={dataset} options={options} />
+    case 'radar':         return <Radar     data={dataset} options={options} />
+    default:              return <Bar       data={dataset} options={options} />
   }
 }
 
