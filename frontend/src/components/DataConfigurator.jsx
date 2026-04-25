@@ -235,28 +235,40 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
 
   // Detect when Sum is producing unreasonably inflated values
   const aggregationWarning = useMemo(() => {
-    if (duplicateStrategy !== 'sum') return null
-    // Find the max raw value in the value column
-    const rawNumerics = rows.map(r => parseFloat((r[valueCol] || '').trim())).filter(v => !isNaN(v))
-    if (!rawNumerics.length) return null
-    const rawMax = Math.max(...rawNumerics)
-    // Check how many rows map to each label
-    const labelCounts = {}
-    rows.forEach(r => {
-      const lbl = (r[labelCol] || '').trim()
-      if (lbl) labelCounts[lbl] = (labelCounts[lbl] || 0) + 1
-    })
-    const maxGroupSize = Math.max(...Object.values(labelCounts))
-    // If summing would multiply the value by a large factor, warn
-    if (maxGroupSize > 5 && rawMax * maxGroupSize > rawMax * 3) {
+    try {
+      if (duplicateStrategy !== 'sum') return null
       const colName = columnNames[valueCol]
-      const avgHints = ['age', 'salary', 'price', 'score', 'rate', 'temp', 'height', 'weight', 'fare', 'grade', 'rating', 'percent', 'income']
-      const looksLikeMeasurement = avgHints.some(h => colName.toLowerCase().includes(h)) || rawMax > 100
-      if (looksLikeMeasurement) {
-        return `⚠ "${colName}" looks like a measurement (max raw value: ${rawMax.toLocaleString()}). With Sum, values from up to ${maxGroupSize} rows get added together — producing numbers like ${(rawMax * maxGroupSize).toLocaleString()}. Switch to "Average" to get meaningful values like the actual ${colName}.`
+      if (!colName) return null
+
+      const rawNumerics = rows
+        .map(r => parseFloat((r[valueCol] ?? '').toString().trim()))
+        .filter(v => !isNaN(v) && isFinite(v))
+      if (rawNumerics.length === 0) return null
+
+      const rawMax = Math.max(...rawNumerics)
+      if (!isFinite(rawMax) || rawMax <= 0) return null
+
+      const labelCounts = {}
+      rows.forEach(r => {
+        const lbl = (r[labelCol] ?? '').toString().trim()
+        if (lbl) labelCounts[lbl] = (labelCounts[lbl] || 0) + 1
+      })
+      const groupSizes = Object.values(labelCounts)
+      if (groupSizes.length === 0) return null
+      const maxGroupSize = Math.max(...groupSizes)
+
+      if (maxGroupSize > 5) {
+        const avgHints = ['age', 'salary', 'price', 'score', 'rate', 'temp', 'height',
+                          'weight', 'fare', 'grade', 'rating', 'percent', 'income', 'value']
+        const looksLikeMeasurement = avgHints.some(h => colName.toLowerCase().includes(h)) || rawMax > 100
+        if (looksLikeMeasurement) {
+          return `"${colName}" looks like a measurement (individual values up to ${rawMax.toLocaleString()}). With Sum, up to ${maxGroupSize} rows get added — producing numbers like ${Math.round(rawMax * maxGroupSize).toLocaleString()}. Switch to "Average" to get the actual per-group ${colName}.`
+        }
       }
+      return null
+    } catch {
+      return null
     }
-    return null
   }, [rows, labelCol, valueCol, duplicateStrategy, columnNames])
 
   const processedPreview = useMemo(() => {
