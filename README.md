@@ -2,7 +2,7 @@
 
 > Turn any CSV file into beautiful, interactive charts — instantly, in your browser.
 
-**Live Demo → [datasnap-visual-data-insights.vercel.app](https://datasnap-visual-data-insights.vercel.app)**
+**Live Demo → https://data-snap-visual-data-insights.vercel.app/**
 
 No account. No upload to any server. No data leaves your device.
 
