@@ -15,6 +15,137 @@ const DUPLICATE_OPTIONS = [
   { id: 'average', label: 'Average Values' },
 ]
 
+// ── Smart suggestion engine ──────────────────────────────────────────────────
+
+function analyzeColumns(columnNames, rows) {
+  const n = rows.length
+  return columnNames.map((name, idx) => {
+    const raw      = rows.map(r => (r[idx] ?? '').trim()).filter(v => v !== '')
+    const numerics = raw.map(v => parseFloat(v)).filter(v => !isNaN(v))
+    const unique   = [...new Set(raw)]
+    const nameLow  = name.toLowerCase()
+
+    const isIdLike        = nameLow.includes('id') || nameLow === 'index' || nameLow === '#' || unique.length === n
+    const numericRatio    = numerics.length / Math.max(raw.length, 1)
+    const isNumeric       = numericRatio > 0.85
+    const isBinary        = isNumeric && unique.length <= 2 && numerics.every(v => v === 0 || v === 1)
+    const isLowCardinality = unique.length <= 20
+    const isCategorical   = !isNumeric && isLowCardinality
+    const hasNegatives    = numerics.some(v => v < 0)
+    const looksLikeDate   = !isNumeric && raw.some(v => /\d{4}[-/]\d{1,2}/.test(v) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(v))
+
+    return {
+      idx, name, isIdLike, isNumeric, isBinary, isCategorical, isLowCardinality,
+      looksLikeDate, hasNegatives, cardinality: unique.length, numericRatio, numerics,
+    }
+  })
+}
+
+function suggestBestConfig(columnNames, rows) {
+  const analysis = analyzeColumns(columnNames, rows)
+
+  // Score each column as a potential LABEL (categories/X-axis)
+  const labelCandidates = analysis.map(c => {
+    if (c.isIdLike) return { ...c, labelScore: -200 }
+    let s = 0
+    if (c.isCategorical)              s += 60   // text categorical = ideal
+    if (c.looksLikeDate)              s += 30   // date-like = good for line
+    if (c.cardinality >= 2  && c.cardinality <= 5)  s += 50
+    if (c.cardinality >= 6  && c.cardinality <= 15) s += 35
+    if (c.cardinality >= 16 && c.cardinality <= 30) s += 10
+    if (c.cardinality > 30)           s -= 40   // too many = bad label
+    if (c.isNumeric && c.cardinality > 15) s -= 60  // numeric high-cardinality = terrible label
+    if (c.isNumeric && c.cardinality <= 6) s += 20  // numeric but few values (e.g. Pclass 1,2,3) = ok
+    return { ...c, labelScore: s }
+  }).sort((a, b) => b.labelScore - a.labelScore)
+
+  // Score each column as a potential VALUE (Y-axis/numbers)
+  const valueCandidates = analysis.map(c => {
+    if (c.isIdLike) return { ...c, valueScore: -200 }
+    let s = 0
+    if (c.isNumeric)    s += 80
+    if (c.isBinary)     s += 10
+    if (!c.isNumeric)   s -= 60
+    return { ...c, valueScore: s }
+  }).sort((a, b) => b.valueScore - a.valueScore)
+
+  // Pick best non-overlapping pair
+  let labelIdx = labelCandidates[0]?.idx ?? 0
+  let valueIdx = valueCandidates[0]?.idx ?? 1
+  if (labelIdx === valueIdx) {
+    const altV = valueCandidates.find(c => c.idx !== labelIdx)
+    const altL = labelCandidates.find(c => c.idx !== valueIdx)
+    if (altV) valueIdx = altV.idx
+    else if (altL) labelIdx = altL.idx
+  }
+
+  const lA = analysis[labelIdx]
+  const vA = analysis[valueIdx]
+
+  // Determine best chart type
+  let chartType  = 'bar'
+  let chartReason = ''
+
+  if (lA.looksLikeDate) {
+    chartType   = 'line'
+    chartReason = 'Date-like labels detected — a Line chart shows trends over time best.'
+  } else if (lA.cardinality <= 4) {
+    chartType   = 'doughnut'
+    chartReason = `Only ${lA.cardinality} categories — a Doughnut chart shows part-of-whole proportions clearly.`
+  } else if (lA.cardinality <= 8) {
+    chartType   = 'pie'
+    chartReason = `${lA.cardinality} categories — a Pie chart gives a clear breakdown.`
+  } else if (lA.cardinality <= 20) {
+    chartType   = 'bar'
+    chartReason = `${lA.cardinality} categories — a Bar chart is the clearest comparison tool here.`
+  } else {
+    chartType   = 'bar'
+    chartReason = `Many categories (${lA.cardinality}). Bar chart used — consider using the Min/Max filter or Duplicate handling to reduce noise.`
+  }
+
+  // Determine duplicate strategy
+  let duplicateStrategy = 'sum'
+  let dupReason = 'Summing duplicate labels to aggregate totals.'
+  if (vA.isBinary) {
+    duplicateStrategy = 'average'
+    dupReason = 'Binary (0/1) values detected — averaging gives a rate/proportion.'
+  } else if (vA.hasNegatives) {
+    duplicateStrategy = 'average'
+    dupReason = 'Negative values detected — averaging is safer than summing.'
+  }
+
+  // Detect column quality issues
+  const warnings = []
+  if (lA.isIdLike)    warnings.push(`"${lA.name}" looks like an ID column — using it as a label will create one bar per row.`)
+  if (!vA.isNumeric)  warnings.push(`"${vA.name}" is not numeric — values may not chart correctly.`)
+  if (lA.cardinality > 30) warnings.push(`${lA.cardinality} unique labels is a lot — the chart may look crowded. Try filtering.`)
+
+  // Confidence
+  const confidence = lA.labelScore > 30 && vA.valueScore > 50 ? 'high' : lA.labelScore > 0 ? 'medium' : 'low'
+
+  return {
+    labelCol: labelIdx,
+    valueCol: valueIdx,
+    chartType,
+    duplicateStrategy,
+    skipEmpty: true,
+    skipNonNumeric: true,
+    trimWhitespace: true,
+    minValue: '',
+    maxValue: '',
+    reasoning: {
+      labelCol:  `"${lA.name}" (${lA.cardinality} unique values, ${lA.isCategorical ? 'categorical' : lA.isNumeric ? 'numeric' : 'mixed'})`,
+      valueCol:  `"${vA.name}" (numeric${vA.isBinary ? ', binary 0/1' : ''})`,
+      chartType: chartReason,
+      duplicate: dupReason,
+      confidence,
+      warnings,
+    },
+  }
+}
+
+// ── Data processing (same as before) ────────────────────────────────────────
+
 function applyCleaningAndAggregate(rows, config) {
   const { labelCol, valueCol, skipEmpty, skipNonNumeric, trimWhitespace, duplicateStrategy, minValue, maxValue } = config
 
@@ -23,56 +154,40 @@ function applyCleaningAndAggregate(rows, config) {
     raw:   trimWhitespace ? (row[valueCol] || '').trim() : (row[valueCol] || ''),
   }))
 
-  if (skipEmpty) {
-    processed = processed.filter(r => r.label !== '' && r.raw !== '')
-  }
+  if (skipEmpty)      processed = processed.filter(r => r.label !== '' && r.raw !== '')
 
-  let withValues = processed.map(r => ({ label: r.label, value: parseFloat(r.raw), rawStr: r.raw }))
+  let withValues = processed.map(r => ({ label: r.label, value: parseFloat(r.raw) }))
 
-  if (skipNonNumeric) {
-    withValues = withValues.filter(r => !isNaN(r.value))
-  } else {
-    withValues = withValues.map(r => ({ ...r, value: isNaN(r.value) ? 0 : r.value }))
-  }
+  if (skipNonNumeric) withValues = withValues.filter(r => !isNaN(r.value))
+  else                withValues = withValues.map(r => ({ ...r, value: isNaN(r.value) ? 0 : r.value }))
 
-  if (minValue !== '') {
-    const min = parseFloat(minValue)
-    if (!isNaN(min)) withValues = withValues.filter(r => r.value >= min)
-  }
-  if (maxValue !== '') {
-    const max = parseFloat(maxValue)
-    if (!isNaN(max)) withValues = withValues.filter(r => r.value <= max)
-  }
+  if (minValue !== '') { const min = parseFloat(minValue); if (!isNaN(min)) withValues = withValues.filter(r => r.value >= min) }
+  if (maxValue !== '') { const max = parseFloat(maxValue); if (!isNaN(max)) withValues = withValues.filter(r => r.value <= max) }
 
   const grouped = new Map()
   for (const r of withValues) {
-    if (!grouped.has(r.label)) {
-      grouped.set(r.label, [])
-    }
+    if (!grouped.has(r.label)) grouped.set(r.label, [])
     grouped.get(r.label).push(r.value)
   }
 
-  const labels = []
-  const values = []
+  const labels = [], values = []
   for (const [label, vals] of grouped.entries()) {
     labels.push(label)
-    if (duplicateStrategy === 'sum') {
-      values.push(vals.reduce((a, b) => a + b, 0))
-    } else if (duplicateStrategy === 'average') {
-      values.push(vals.reduce((a, b) => a + b, 0) / vals.length)
-    } else {
-      values.push(vals[0])
-    }
+    if (duplicateStrategy === 'sum')    values.push(vals.reduce((a, b) => a + b, 0))
+    else if (duplicateStrategy === 'average') values.push(vals.reduce((a, b) => a + b, 0) / vals.length)
+    else values.push(vals[0])
   }
 
   return { labels, values }
 }
 
+// ── Component ────────────────────────────────────────────────────────────────
+
 export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
   const { columnNames, rows } = parsedData
 
   const [labelCol, setLabelCol]             = useState(0)
-  const [valueCol, setValueCol]             = useState(1)
+  const [valueCol, setValueCol]             = useState(Math.min(1, columnNames.length - 1))
   const [chartType, setChartType]           = useState('bar')
   const [skipEmpty, setSkipEmpty]           = useState(true)
   const [skipNonNumeric, setSkipNonNumeric] = useState(true)
@@ -80,6 +195,8 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
   const [duplicateStrategy, setDuplicate]   = useState('sum')
   const [minValue, setMinValue]             = useState('')
   const [maxValue, setMaxValue]             = useState('')
+  const [suggestion, setSuggestion]         = useState(null)
+  const [suggestionApplied, setSuggestionApplied] = useState(false)
 
   const preview = useMemo(() => rows.slice(0, 5), [rows])
 
@@ -89,10 +206,27 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
         labelCol, valueCol, skipEmpty, skipNonNumeric,
         trimWhitespace, duplicateStrategy, minValue, maxValue,
       })
-    } catch {
-      return null
-    }
+    } catch { return null }
   }, [rows, labelCol, valueCol, skipEmpty, skipNonNumeric, trimWhitespace, duplicateStrategy, minValue, maxValue])
+
+  function handleSuggest() {
+    const s = suggestBestConfig(columnNames, rows)
+    setSuggestion(s)
+    setSuggestionApplied(false)
+  }
+
+  function applySuggestion() {
+    setLabelCol(suggestion.labelCol)
+    setValueCol(suggestion.valueCol)
+    setChartType(suggestion.chartType)
+    setDuplicate(suggestion.duplicateStrategy)
+    setSkipEmpty(suggestion.skipEmpty)
+    setSkipNonNumeric(suggestion.skipNonNumeric)
+    setTrimWhitespace(suggestion.trimWhitespace)
+    setMinValue(suggestion.minValue)
+    setMaxValue(suggestion.maxValue)
+    setSuggestionApplied(true)
+  }
 
   function handleGenerate() {
     if (!processedPreview || processedPreview.labels.length === 0) return
@@ -115,8 +249,73 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
             {rows.length} rows &middot; {columnNames.length} columns detected
           </p>
         </div>
-        <button className="btn btn-ghost" onClick={onBack}>← Upload Different File</button>
+        <div style={{ display: 'flex', gap: '.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-suggest" onClick={handleSuggest}>
+            <span>✨</span> Suggest Best Chart
+          </button>
+          <button className="btn btn-ghost" onClick={onBack}>← Upload Different File</button>
+        </div>
       </div>
+
+      {/* Suggestion Panel */}
+      {suggestion && (
+        <div className={`suggestion-panel ${suggestion.reasoning.confidence}`}>
+          <div className="suggestion-header">
+            <div className="suggestion-title">
+              <span className="suggestion-badge">
+                {suggestion.reasoning.confidence === 'high' ? '✨ High Confidence' :
+                 suggestion.reasoning.confidence === 'medium' ? '⚡ Medium Confidence' : '⚠ Low Confidence'} Suggestion
+              </span>
+              <button className="suggestion-close" onClick={() => setSuggestion(null)}>✕</button>
+            </div>
+            {suggestionApplied && (
+              <div className="suggestion-applied-note">✓ Settings applied below — click "Generate Chart" to visualize.</div>
+            )}
+          </div>
+
+          <div className="suggestion-body">
+            <div className="suggestion-grid">
+              <div className="suggestion-item">
+                <span className="sug-label">Label Column</span>
+                <span className="sug-value">{suggestion.reasoning.labelCol}</span>
+              </div>
+              <div className="suggestion-item">
+                <span className="sug-label">Value Column</span>
+                <span className="sug-value">{suggestion.reasoning.valueCol}</span>
+              </div>
+              <div className="suggestion-item">
+                <span className="sug-label">Recommended Chart</span>
+                <span className="sug-value">
+                  {CHART_TYPES.find(c => c.id === suggestion.chartType)?.icon}{' '}
+                  {CHART_TYPES.find(c => c.id === suggestion.chartType)?.label}
+                </span>
+              </div>
+              <div className="suggestion-item">
+                <span className="sug-label">Duplicate Strategy</span>
+                <span className="sug-value">{DUPLICATE_OPTIONS.find(d => d.id === suggestion.duplicateStrategy)?.label}</span>
+              </div>
+            </div>
+
+            <div className="suggestion-reasons">
+              <p className="reason-line">📊 {suggestion.reasoning.chartType}</p>
+              <p className="reason-line">🔁 {suggestion.reasoning.duplicate}</p>
+              {suggestion.reasoning.warnings.map((w, i) => (
+                <p key={i} className="reason-line warning">⚠ {w}</p>
+              ))}
+            </div>
+
+            {!suggestionApplied ? (
+              <button className="btn btn-primary" onClick={applySuggestion}>
+                Apply This Suggestion
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={handleGenerate} disabled={!canGenerate}>
+                Generate Chart Now →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="config-grid">
 
@@ -129,16 +328,12 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
-                  <tr>
-                    {columnNames.map((col, i) => <th key={i}>{col}</th>)}
-                  </tr>
+                  <tr>{columnNames.map((col, i) => <th key={i}>{col}</th>)}</tr>
                 </thead>
                 <tbody>
                   {preview.map((row, ri) => (
                     <tr key={ri}>
-                      {columnNames.map((_, ci) => (
-                        <td key={ci}>{row[ci] ?? ''}</td>
-                      ))}
+                      {columnNames.map((_, ci) => <td key={ci}>{row[ci] ?? ''}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -152,18 +347,14 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
             <div className="field-row">
               <div className="field">
                 <label className="field-label">Label Column (X-axis / Categories)</label>
-                <select className="select" value={labelCol} onChange={e => setLabelCol(Number(e.target.value))}>
-                  {columnNames.map((col, i) => (
-                    <option key={i} value={i}>{col}</option>
-                  ))}
+                <select className="select" value={labelCol} onChange={e => { setLabelCol(Number(e.target.value)); setSuggestionApplied(false) }}>
+                  {columnNames.map((col, i) => <option key={i} value={i}>{col}</option>)}
                 </select>
               </div>
               <div className="field">
                 <label className="field-label">Value Column (Y-axis / Numbers)</label>
-                <select className="select" value={valueCol} onChange={e => setValueCol(Number(e.target.value))}>
-                  {columnNames.map((col, i) => (
-                    <option key={i} value={i}>{col}</option>
-                  ))}
+                <select className="select" value={valueCol} onChange={e => { setValueCol(Number(e.target.value)); setSuggestionApplied(false) }}>
+                  {columnNames.map((col, i) => <option key={i} value={i}>{col}</option>)}
                 </select>
               </div>
             </div>
@@ -201,13 +392,7 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
               <div className="radio-group">
                 {DUPLICATE_OPTIONS.map(opt => (
                   <label key={opt.id} className={`radio-btn ${duplicateStrategy === opt.id ? 'active' : ''}`}>
-                    <input
-                      type="radio"
-                      name="duplicate"
-                      value={opt.id}
-                      checked={duplicateStrategy === opt.id}
-                      onChange={() => setDuplicate(opt.id)}
-                    />
+                    <input type="radio" name="duplicate" value={opt.id} checked={duplicateStrategy === opt.id} onChange={() => setDuplicate(opt.id)} />
                     {opt.label}
                   </label>
                 ))}
@@ -217,23 +402,11 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
             <div className="field-row" style={{ marginTop: '1rem' }}>
               <div className="field">
                 <label className="field-label">Min Value Filter</label>
-                <input
-                  type="number"
-                  className="input"
-                  placeholder="No minimum"
-                  value={minValue}
-                  onChange={e => setMinValue(e.target.value)}
-                />
+                <input type="number" className="input" placeholder="No minimum" value={minValue} onChange={e => setMinValue(e.target.value)} />
               </div>
               <div className="field">
                 <label className="field-label">Max Value Filter</label>
-                <input
-                  type="number"
-                  className="input"
-                  placeholder="No maximum"
-                  value={maxValue}
-                  onChange={e => setMaxValue(e.target.value)}
-                />
+                <input type="number" className="input" placeholder="No maximum" value={maxValue} onChange={e => setMaxValue(e.target.value)} />
               </div>
             </div>
           </div>
@@ -296,15 +469,11 @@ export default function DataConfigurator({ parsedData, onVisualize, onBack }) {
                 </table>
               </div>
             ) : (
-              <p className="empty-state">No data matches the current cleaning rules. Try adjusting the options.</p>
+              <p className="empty-state">No data matches current cleaning rules. Try adjusting the options.</p>
             )}
           </div>
 
-          <button
-            className="btn btn-primary btn-full"
-            onClick={handleGenerate}
-            disabled={!canGenerate}
-          >
+          <button className="btn btn-primary btn-full" onClick={handleGenerate} disabled={!canGenerate}>
             Generate Chart →
           </button>
         </div>
